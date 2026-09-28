@@ -52,6 +52,9 @@ EXPONENTS = (10**3, 10**4, 10**5, 10**6, 10**7)
 POW_MOD = 1_000_000_007
 POW_BASE = 3
 
+#: Seed варианта: 30 + номер варианта, тот же, что у генератора данных.
+SEED = 32
+
 REPEATS = 5  # повторов на точку (берётся медиана)
 POW_CALLS = 20_000  # вызовов binary_pow на один замер: иначе время неизмеримо мало
 
@@ -89,6 +92,17 @@ def count_equal_pairs(a: list[int]) -> int:
             if ai == a[j]:
                 pairs += 1
     return pairs
+
+
+def count_equal_pairs_by_freq(a: list[int]) -> int:
+    """То же за Θ(n): значение с k повторами даёт k(k-1)/2 пар.
+
+    Нужна как эталон для сверки — реализация другая, а не копия двойного цикла.
+    """
+    freq: dict[int, int] = {}
+    for value in a:
+        freq[value] = freq.get(value, 0) + 1
+    return sum(k * (k - 1) // 2 for k in freq.values())
 
 
 def binary_pow(x: int, n: int, mod: int | None = None) -> int:
@@ -191,7 +205,7 @@ def self_check() -> None:
     assert binary_pow(2, 10, mod=1000) == 24
 
     # Сверка с эталонными реализациями на случайных данных
-    rng = random.Random(0)
+    rng = random.Random(SEED)
     for _ in range(200):
         a = [rng.randint(-50, 50) for _ in range(rng.randint(1, 60))]
         assert array_sum(a) == sum(a)
@@ -200,9 +214,124 @@ def self_check() -> None:
         x, n = rng.randint(2, 50), rng.randint(0, 64)
         assert binary_pow(x, n, mod=POW_MOD) == pow(x, n, POW_MOD)
 
-    # TODO: добавить собственные проверки инвариантов и описать их в отчёте
-    # (например: count_equal_pairs на массиве из попарно различных элементов = 0).
+    check_own_invariants()
     print("self_check: OK")
+
+
+# --- Собственные проверки: инварианты и границы -------------------------------
+# Явные исключения, а не assert: assert отключается при python -O.
+
+
+class SelfCheckError(Exception):
+    """Нарушен инвариант реализации."""
+
+
+def expect(condition: bool, message: str) -> None:
+    """Условие должно выполняться, иначе SelfCheckError."""
+    if not condition:
+        raise SelfCheckError(message)
+
+
+def expect_raises(call, exc: type[Exception], what: str) -> None:
+    """call() должен возбудить exc."""
+    try:
+        call()
+    except exc:
+        return
+    raise SelfCheckError(f"{what}: ожидался {exc.__name__}, исключения не было")
+
+
+def check_pairs_invariants() -> None:
+    """Различные элементы, одинаковые элементы, сверка с линейным эталоном."""
+    distinct = list(range(200))
+    got = count_equal_pairs(distinct)
+    expect(got == 0, f"попарно различные элементы дали {got} пар, ожидалось 0")
+
+    for k in (0, 1, 2, 5, 40):
+        got = count_equal_pairs([7] * k)
+        expected = k * (k - 1) // 2
+        expect(
+            got == expected,
+            f"массив из {k} одинаковых элементов: {got} пар, ожидалось {expected}",
+        )
+
+    rng = random.Random(SEED)
+    for _ in range(300):
+        n = rng.randint(0, 80)
+        a = [rng.randrange(6) for _ in range(n)]  # узкий диапазон => много пар
+        quadratic, linear = count_equal_pairs(a), count_equal_pairs_by_freq(a)
+        expect(
+            quadratic == linear,
+            f"расхождение на {a}: двойной цикл {quadratic}, частоты {linear}",
+        )
+
+
+def check_sum_max_invariants() -> None:
+    """Сумма не зависит от порядка; максимум лежит в массиве и не меньше всех."""
+    rng = random.Random(SEED)
+    for _ in range(200):
+        a = [rng.randint(-(10**6), 10**6) for _ in range(rng.randint(1, 100))]
+        shuffled = a[:]
+        rng.shuffle(shuffled)
+        expect(
+            array_sum(a) == array_sum(shuffled),
+            f"сумма изменилась при перестановке: {array_sum(a)} и {array_sum(shuffled)}",
+        )
+        top = array_max(a)
+        expect(top in a, f"максимум {top} отсутствует в массиве")
+        expect(
+            all(value <= top for value in a), f"нашёлся элемент больше максимума {top}"
+        )
+
+    for a in ([7], [-3], [4] * 10, [-5] * 10):  # один элемент, все равные
+        expect(array_sum(a) == sum(a), f"array_sum({a}) = {array_sum(a)}")
+        expect(array_max(a) == max(a), f"array_max({a}) = {array_max(a)}")
+
+    expect(array_sum([]) == 0, "сумма пустого массива должна быть нулём")
+    expect_raises(lambda: array_max([]), ValueError, "array_max([])")
+    expect_raises(lambda: max([]), ValueError, "эталон max([])")
+
+
+def check_binary_pow_invariants() -> None:
+    """Тождество степеней, границы степеней двойки, mod = 1, область определения."""
+    rng = random.Random(SEED)
+    for _ in range(200):
+        x = rng.randint(2, 10**6)
+        p, q = rng.randint(0, 10**4), rng.randint(0, 10**4)
+        left = binary_pow(x, p + q, mod=POW_MOD)  # x^(p+q) = x^p * x^q
+        right = binary_pow(x, p, mod=POW_MOD) * binary_pow(x, q, mod=POW_MOD) % POW_MOD
+        expect(
+            left == right, f"x={x}, p={p}, q={q}: x^(p+q) = {left}, x^p * x^q = {right}"
+        )
+
+    for n in (0, 1, 2, 63, 64, 65, 1023, 1024):  # границы степеней двойки
+        got, expected = binary_pow(POW_BASE, n, mod=POW_MOD), pow(POW_BASE, n, POW_MOD)
+        expect(
+            got == expected, f"binary_pow({POW_BASE}, {n}) = {got}, эталон {expected}"
+        )
+
+    for n in (0, 1, 7):  # mod = 1: ответ всегда 0
+        got, expected = binary_pow(5, n, mod=1), pow(5, n, 1)
+        expect(got == expected, f"binary_pow(5, {n}, mod=1) = {got}, эталон {expected}")
+
+    expect_raises(lambda: binary_pow(2, -1), ValueError, "binary_pow(2, -1)")
+    expect_raises(
+        lambda: binary_pow(2, 10, mod=0), ValueError, "binary_pow(2, 10, mod=0)"
+    )
+
+    got, expected = binary_pow(3, 500), 3**500  # без модуля — длинная арифметика
+    expect(got == expected, "binary_pow(3, 500) без модуля разошёлся с 3 ** 500")
+
+
+def check_own_invariants() -> None:
+    """Запуск всех собственных проверок."""
+    for name, check in (
+        ("пары равных", check_pairs_invariants),
+        ("сумма и максимум", check_sum_max_invariants),
+        ("бинарная степень", check_binary_pow_invariants),
+    ):
+        check()
+        print(f"  инварианты, {name}: OK")
 
 
 # ---------------------------------------------------------------------------
