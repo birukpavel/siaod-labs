@@ -1,0 +1,30 @@
+{
+  "variant": 2,
+  "seed": 32,
+  "base_seed": 30,
+  "sets": [
+    "arrays"
+  ],
+  "files": [
+    "arrays_dups_1000.txt",
+    "arrays_dups_10000.txt",
+    "arrays_dups_100000.txt",
+    "arrays_dups_3000.txt",
+    "arrays_dups_30000.txt",
+    "arrays_random_1000.txt",
+    "arrays_random_10000.txt",
+    "arrays_random_100000.txt",
+    "arrays_random_3000.txt",
+    "arrays_random_30000.txt",
+    "arrays_reversed_1000.txt",
+    "arrays_reversed_10000.txt",
+    "arrays_reversed_100000.txt",
+    "arrays_reversed_3000.txt",
+    "arrays_reversed_30000.txt",
+    "arrays_sorted_1000.txt",
+    "arrays_sorted_10000.txt",
+    "arrays_sorted_100000.txt",
+    "arrays_sorted_3000.txt",
+    "arrays_sorted_30000.txt"
+  ]
+}

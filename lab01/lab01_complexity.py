@@ -1,0 +1,492 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""ЛР 1. Анализ временной сложности элементарных алгоритмов.
+
+Бирук Павел, вариант 2 (seed 32). Каркас загрузки данных, замеров
+и графиков — из заготовки курса.
+
+Данные варианта: make data FOS=<путь к репозиторию курса>
+
+Запуск:
+
+    python lab01/lab01_complexity.py --variant 2 --out lab01/figures
+
+Если data/generated не находится автоматически — --data <путь>.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import math
+import random
+import statistics
+import time
+from pathlib import Path
+
+# ---------------------------------------------------------------------------
+# Параметры эксперимента
+# ---------------------------------------------------------------------------
+
+#: Размеры массивов, для которых generate_data.py создаёт файлы.
+SIZES = (1_000, 3_000, 10_000, 30_000, 100_000)
+
+#: Для квадратичного алгоритма n = 100 000 исключён: это порядка 15 минут.
+#: Размер 500 берётся как префикс файла на 1 000 элементов — так у нас
+#: остаётся пять точек, как требует задание.
+QUADRATIC_SIZES = (500, 1_000, 3_000, 10_000, 30_000)
+
+#: Показатели степени для замера бинарного возведения в степень.
+EXPONENTS = (10**3, 10**4, 10**5, 10**6, 10**7)
+
+#: Модуль для возведения в степень. Без него Python считает длинную арифметику,
+#: и замер покажет рост длины чисел, а не число итераций (см. отчёт).
+POW_MOD = 1_000_000_007
+POW_BASE = 3
+
+#: Seed варианта: 30 + номер варианта, тот же, что у генератора данных.
+SEED = 32
+
+REPEATS = 5  # повторов на точку (берётся медиана)
+POW_CALLS = 20_000  # вызовов binary_pow на один замер: иначе время неизмеримо мало
+
+# ---------------------------------------------------------------------------
+# 1. Алгоритмы (реализуются вручную, без sum/max и встроенного pow)
+# ---------------------------------------------------------------------------
+
+
+def array_sum(a: list[int]) -> int:
+    """Сумма элементов. Θ(n), память Θ(1)."""
+    total = 0
+    for value in a:
+        total += value
+    return total
+
+
+def array_max(a: list[int]) -> int:
+    """Максимум. Θ(n): каждый элемент нужно сравнить хотя бы раз."""
+    if not a:
+        raise ValueError("максимум не определён для пустого массива")
+    best = a[0]
+    for value in a:
+        if value > best:  # pylint: disable=consider-using-max-builtin
+            best = value
+    return best
+
+
+def count_equal_pairs(a: list[int]) -> int:
+    """Пары (i, j), i < j, с a[i] == a[j]. Двойной цикл: n(n-1)/2 сравнений, Θ(n²)."""
+    n = len(a)
+    pairs = 0
+    for i in range(n):
+        ai = a[i]  # вынесено из внутреннего цикла
+        for j in range(i + 1, n):
+            if ai == a[j]:
+                pairs += 1
+    return pairs
+
+
+def count_equal_pairs_by_freq(a: list[int]) -> int:
+    """То же за Θ(n): значение с k повторами даёт k(k-1)/2 пар.
+
+    Нужна как эталон для сверки — реализация другая, а не копия двойного цикла.
+    """
+    freq: dict[int, int] = {}
+    for value in a:
+        freq[value] = freq.get(value, 0) + 1
+    return sum(k * (k - 1) // 2 for k in freq.values())
+
+
+def binary_pow(x: int, n: int, mod: int | None = None) -> int:
+    """x^n (при mod — по модулю). Итераций = число битов n, отсюда Θ(log n)."""
+    if n < 0:
+        raise ValueError(f"показатель должен быть неотрицательным, получено {n}")
+    if mod is not None and mod <= 0:
+        raise ValueError(f"модуль должен быть положительным, получено {mod}")
+    result = 1 if mod is None else 1 % mod  # при mod == 1 ответ 0, даже для n == 0
+    base = x if mod is None else x % mod
+    while n > 0:
+        if n & 1:
+            result *= base
+            if mod is not None:
+                result %= mod
+        base *= base
+        if mod is not None:
+            base %= mod
+        n >>= 1
+    return result
+
+
+# ---------------------------------------------------------------------------
+# 2. Данные варианта: поиск каталога и загрузка
+# ---------------------------------------------------------------------------
+
+
+def find_data_dir(explicit: Path | None) -> Path:
+    """Каталог с данными варианта: --data, либо data/generated рядом с работой."""
+    if explicit is not None:
+        if not explicit.is_dir():
+            raise SystemExit(f"Каталог не найден: {explicit}")
+        return explicit
+    candidates = []
+    for base in (Path.cwd(), Path(__file__).resolve().parent):
+        for parent in (base, *base.parents):
+            candidates.append(parent / "data" / "generated")
+    for path in candidates:
+        if path.is_dir():
+            return path
+    raise SystemExit(
+        "Не найден каталог data/generated с данными варианта.\n"
+        "Сгенерируйте данные из корня репозитория курса:\n"
+        "    python scripts/generate_data.py --variant N --only arrays\n"
+        "или укажите каталог явно: --data <путь>"
+    )
+
+
+def check_variant(data_dir: Path, variant: int) -> None:
+    """Сверить номер варианта с паспортом данных (manifest.json)."""
+    manifest_path = data_dir / "manifest.json"
+    if not manifest_path.is_file():
+        print(
+            f"ВНИМАНИЕ: в {data_dir} нет manifest.json — "
+            f"не могу проверить, что данные относятся к варианту {variant}."
+        )
+        return
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    actual = manifest.get("variant")
+    if actual != variant:
+        raise SystemExit(
+            f"Данные в {data_dir} сгенерированы для варианта {actual}, "
+            f"а работа запущена с --variant {variant}.\n"
+            f"Перегенерируйте данные: "
+            f"python scripts/generate_data.py --variant {variant} --only arrays"
+        )
+    print(f"Данные варианта {variant} (seed={manifest.get('seed')}) из {data_dir}")
+
+
+def load_array(
+    data_dir: Path, kind: str, n: int, limit: int | None = None
+) -> list[int]:
+    """Загрузить массив arrays_<kind>_<n>.txt; limit — взять только первые limit чисел."""
+    path = data_dir / f"arrays_{kind}_{n}.txt"
+    if not path.is_file():
+        raise SystemExit(
+            f"Не найден файл данных: {path}\n"
+            f"Сгенерируйте его: python scripts/generate_data.py "
+            f"--variant <ваш вариант> --only arrays"
+        )
+    values = [int(line) for line in path.read_text(encoding="utf-8").split()]
+    return values[:limit] if limit is not None else values
+
+
+# ---------------------------------------------------------------------------
+# 3. Репрезентативные тесты и инварианты (шаги 1–3 методики верификации)
+# ---------------------------------------------------------------------------
+
+
+def self_check() -> None:
+    """Граничные и типовые случаи + сверка с эталоном (sum, max, pow)."""
+    # Граничные случаи
+    assert array_sum([]) == 0
+    assert array_sum([7]) == 7
+    assert array_max([3, 1, 2]) == 3
+    assert count_equal_pairs([]) == 0
+    assert count_equal_pairs([5, 5, 5]) == 3  # пары (0,1), (0,2), (1,2)
+    assert binary_pow(2, 0) == 1
+    assert binary_pow(2, 10) == 1024
+    assert binary_pow(2, 10, mod=1000) == 24
+
+    # Сверка с эталонными реализациями на случайных данных
+    rng = random.Random(SEED)
+    for _ in range(200):
+        a = [rng.randint(-50, 50) for _ in range(rng.randint(1, 60))]
+        assert array_sum(a) == sum(a)
+        assert array_max(a) == max(a)
+    for _ in range(200):
+        x, n = rng.randint(2, 50), rng.randint(0, 64)
+        assert binary_pow(x, n, mod=POW_MOD) == pow(x, n, POW_MOD)
+
+    check_own_invariants()
+    print("self_check: OK")
+
+
+# --- Собственные проверки: инварианты и границы -------------------------------
+# Явные исключения, а не assert: assert отключается при python -O.
+
+
+class SelfCheckError(Exception):
+    """Нарушен инвариант реализации."""
+
+
+def expect(condition: bool, message: str) -> None:
+    """Условие должно выполняться, иначе SelfCheckError."""
+    if not condition:
+        raise SelfCheckError(message)
+
+
+def expect_raises(call, exc: type[Exception], what: str) -> None:
+    """call() должен возбудить exc."""
+    try:
+        call()
+    except exc:
+        return
+    raise SelfCheckError(f"{what}: ожидался {exc.__name__}, исключения не было")
+
+
+def check_pairs_invariants() -> None:
+    """Различные элементы, одинаковые элементы, сверка с линейным эталоном."""
+    distinct = list(range(200))
+    got = count_equal_pairs(distinct)
+    expect(got == 0, f"попарно различные элементы дали {got} пар, ожидалось 0")
+
+    for k in (0, 1, 2, 5, 40):
+        got = count_equal_pairs([7] * k)
+        expected = k * (k - 1) // 2
+        expect(
+            got == expected,
+            f"массив из {k} одинаковых элементов: {got} пар, ожидалось {expected}",
+        )
+
+    rng = random.Random(SEED)
+    for _ in range(300):
+        n = rng.randint(0, 80)
+        a = [rng.randrange(6) for _ in range(n)]  # узкий диапазон => много пар
+        quadratic, linear = count_equal_pairs(a), count_equal_pairs_by_freq(a)
+        expect(
+            quadratic == linear,
+            f"расхождение на {a}: двойной цикл {quadratic}, частоты {linear}",
+        )
+
+
+def check_sum_max_invariants() -> None:
+    """Сумма не зависит от порядка; максимум лежит в массиве и не меньше всех."""
+    rng = random.Random(SEED)
+    for _ in range(200):
+        a = [rng.randint(-(10**6), 10**6) for _ in range(rng.randint(1, 100))]
+        shuffled = a[:]
+        rng.shuffle(shuffled)
+        expect(
+            array_sum(a) == array_sum(shuffled),
+            f"сумма изменилась при перестановке: {array_sum(a)} и {array_sum(shuffled)}",
+        )
+        top = array_max(a)
+        expect(top in a, f"максимум {top} отсутствует в массиве")
+        expect(
+            all(value <= top for value in a), f"нашёлся элемент больше максимума {top}"
+        )
+
+    for a in ([7], [-3], [4] * 10, [-5] * 10):  # один элемент, все равные
+        expect(array_sum(a) == sum(a), f"array_sum({a}) = {array_sum(a)}")
+        expect(array_max(a) == max(a), f"array_max({a}) = {array_max(a)}")
+
+    expect(array_sum([]) == 0, "сумма пустого массива должна быть нулём")
+    expect_raises(lambda: array_max([]), ValueError, "array_max([])")
+    expect_raises(lambda: max([]), ValueError, "эталон max([])")
+
+
+def check_binary_pow_invariants() -> None:
+    """Тождество степеней, границы степеней двойки, mod = 1, область определения."""
+    rng = random.Random(SEED)
+    for _ in range(200):
+        x = rng.randint(2, 10**6)
+        p, q = rng.randint(0, 10**4), rng.randint(0, 10**4)
+        left = binary_pow(x, p + q, mod=POW_MOD)  # x^(p+q) = x^p * x^q
+        right = binary_pow(x, p, mod=POW_MOD) * binary_pow(x, q, mod=POW_MOD) % POW_MOD
+        expect(
+            left == right, f"x={x}, p={p}, q={q}: x^(p+q) = {left}, x^p * x^q = {right}"
+        )
+
+    for n in (0, 1, 2, 63, 64, 65, 1023, 1024):  # границы степеней двойки
+        got, expected = binary_pow(POW_BASE, n, mod=POW_MOD), pow(POW_BASE, n, POW_MOD)
+        expect(
+            got == expected, f"binary_pow({POW_BASE}, {n}) = {got}, эталон {expected}"
+        )
+
+    for n in (0, 1, 7):  # mod = 1: ответ всегда 0
+        got, expected = binary_pow(5, n, mod=1), pow(5, n, 1)
+        expect(got == expected, f"binary_pow(5, {n}, mod=1) = {got}, эталон {expected}")
+
+    expect_raises(lambda: binary_pow(2, -1), ValueError, "binary_pow(2, -1)")
+    expect_raises(
+        lambda: binary_pow(2, 10, mod=0), ValueError, "binary_pow(2, 10, mod=0)"
+    )
+
+    got, expected = binary_pow(3, 500), 3**500  # без модуля — длинная арифметика
+    expect(got == expected, "binary_pow(3, 500) без модуля разошёлся с 3 ** 500")
+
+
+def check_own_invariants() -> None:
+    """Запуск всех собственных проверок."""
+    for name, check in (
+        ("пары равных", check_pairs_invariants),
+        ("сумма и максимум", check_sum_max_invariants),
+        ("бинарная степень", check_binary_pow_invariants),
+    ):
+        check()
+        print(f"  инварианты, {name}: OK")
+
+
+# ---------------------------------------------------------------------------
+# 4. Бенчмарк (методика — docs/reproducibility.md)
+# ---------------------------------------------------------------------------
+
+
+def bench(call) -> float:
+    """Медиана времени выполнения call() по REPEATS запускам, с прогревом."""
+    call()  # прогрев — не учитывается
+    times = []
+    for _ in range(REPEATS):
+        t0 = time.perf_counter()
+        call()
+        times.append(time.perf_counter() - t0)
+    return statistics.median(times)
+
+
+def log_log_slope(points: list[tuple[int, float]]) -> float:
+    """Наклон прямой в осях (log n, log t) — оценка показателя степени."""
+    xs = [math.log10(n) for n, _ in points]
+    ys = [math.log10(t) for _, t in points]
+    mx, my = sum(xs) / len(xs), sum(ys) / len(ys)
+    return sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / sum(
+        (x - mx) ** 2 for x in xs
+    )
+
+
+def run_benchmarks(data_dir: Path) -> dict[str, list[tuple[int, float]]]:
+    """Замеры на данных варианта. Возвращает {имя алгоритма: [(n, t), ...]}."""
+    results: dict[str, list[tuple[int, float]]] = {}
+
+    # Линейные алгоритмы — на случайных массивах всех размеров
+    random_arrays = {n: load_array(data_dir, "random", n) for n in SIZES}
+    for name, fn in (("array_sum", array_sum), ("array_max", array_max)):
+        points = []
+        print(f"\n{name}:")
+        for n in SIZES:
+            a = random_arrays[n]
+            t = bench(lambda fn=fn, a=a: fn(a))
+            points.append((n, t))
+            print(f"  n={n:>7}  t={t:.6f} c")
+        results[name] = points
+
+    # Квадратичный алгоритм — на массивах с дубликатами (иначе пар почти нет)
+    print("\ncount_equal_pairs:")
+    points = []
+    for n in QUADRATIC_SIZES:
+        file_n = n if n in SIZES else min(s for s in SIZES if s >= n)
+        a = load_array(data_dir, "dups", file_n, limit=n)
+        t = bench(lambda a=a: count_equal_pairs(a))
+        points.append((n, t))
+        print(f"  n={n:>7}  t={t:.6f} c")
+    results["count_equal_pairs"] = points
+
+    # Логарифмический алгоритм: одна операция слишком быстра, замеряем пачку
+    # вызовов и делим на их число. Считаем по модулю — см. POW_MOD.
+    print(f"\nbinary_pow (по {POW_CALLS} вызовов на точку, по модулю {POW_MOD}):")
+    points = []
+    for e in EXPONENTS:
+
+        def batch(e: int = e) -> None:
+            for _ in range(POW_CALLS):
+                binary_pow(POW_BASE, e, mod=POW_MOD)
+
+        t = bench(batch) / POW_CALLS
+        points.append((e, t))
+        print(f"  n={e:>9}  log2(n)={math.log2(e):5.1f}  t={t:.9f} c")
+    results["binary_pow"] = points
+
+    return results
+
+
+# ---------------------------------------------------------------------------
+# 5. Графики
+# ---------------------------------------------------------------------------
+
+
+def plot_results(results: dict[str, list[tuple[int, float]]], out_dir: Path) -> None:
+    """Два графика: log-log для степенных алгоритмов и t(log n) для бинарной степени."""
+    # matplotlib необязателен: без него работа выполняется, графики пропускаются
+    # pylint: disable=import-outside-toplevel
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")  # сохранение в файл без графической оболочки
+        import matplotlib.pyplot as plt
+    except ImportError:
+        print(
+            "\nmatplotlib не установлен — графики пропущены "
+            "(pip install -r requirements.txt)"
+        )
+        return
+
+    power_law = ("array_sum", "array_max", "count_equal_pairs")
+    fig, ax = plt.subplots(figsize=(7, 5))
+    for name in power_law:
+        points = results[name]
+        ns = [n for n, _ in points]
+        ts = [t for _, t in points]
+        ax.plot(
+            ns, ts, marker="o", label=f"{name} (наклон ≈ {log_log_slope(points):.2f})"
+        )
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_xlabel("размер входа n")
+    ax.set_ylabel("время, с")
+    ax.set_title("Время работы в осях log-log")
+    ax.grid(True, which="both", linewidth=0.3)
+    ax.legend()
+    fig.tight_layout()
+    loglog_path = out_dir / "lab01_loglog.png"
+    fig.savefig(loglog_path, dpi=150)
+
+    points = results["binary_pow"]
+    fig2, ax2 = plt.subplots(figsize=(7, 5))
+    ax2.plot([math.log2(n) for n, _ in points], [t for _, t in points], marker="o")
+    ax2.set_xlabel("log₂ n (число бит показателя)")
+    ax2.set_ylabel("время одного вызова, с")
+    ax2.set_title("Бинарное возведение в степень: t(log₂ n)")
+    ax2.grid(True, linewidth=0.3)
+    fig2.tight_layout()
+    pow_path = out_dir / "lab01_binary_pow.png"
+    fig2.savefig(pow_path, dpi=150)
+
+    print(f"\nГрафики сохранены:\n  {loglog_path}\n  {pow_path}")
+
+
+# ---------------------------------------------------------------------------
+
+
+def main() -> None:
+    """Самопроверка, замеры, наклоны и графики."""
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    ap.add_argument("--variant", type=int, required=True, help="номер варианта")
+    ap.add_argument(
+        "--data",
+        type=Path,
+        default=None,
+        help="каталог с данными варианта (по умолчанию ищется data/generated)",
+    )
+    ap.add_argument(
+        "--out",
+        type=Path,
+        default=Path.cwd(),
+        help="каталог для графиков (по умолчанию текущий)",
+    )
+    args = ap.parse_args()
+
+    data_dir = find_data_dir(args.data)
+    check_variant(data_dir, args.variant)
+
+    self_check()
+    results = run_benchmarks(data_dir)
+
+    print("\nНаклон в осях log-log (оценка показателя степени):")
+    for name in ("array_sum", "array_max", "count_equal_pairs"):
+        print(f"  {name:20s} {log_log_slope(results[name]):.3f}")
+
+    plot_results(results, args.out)
+
+
+if __name__ == "__main__":
+    main()
