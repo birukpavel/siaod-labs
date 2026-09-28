@@ -92,13 +92,23 @@ def count_equal_pairs(a: list[int]) -> int:
 
 
 def binary_pow(x: int, n: int, mod: int | None = None) -> int:
-    """Бинарное возведение в степень, n >= 0. Ожидаемая сложность: TODO.
-
-    При заданном mod все умножения выполняются по модулю (результат x**n % mod).
-    """
-    # TODO: реализовать через квадрирование; при mod применять % mod после
-    # каждого умножения
-    raise NotImplementedError
+    """x^n (при mod — по модулю). Итераций = число битов n, отсюда Θ(log n)."""
+    if n < 0:
+        raise ValueError(f"показатель должен быть неотрицательным, получено {n}")
+    if mod is not None and mod <= 0:
+        raise ValueError(f"модуль должен быть положительным, получено {mod}")
+    result = 1 if mod is None else 1 % mod  # при mod == 1 ответ 0, даже для n == 0
+    base = x if mod is None else x % mod
+    while n > 0:
+        if n & 1:
+            result *= base
+            if mod is not None:
+                result %= mod
+        base *= base
+        if mod is not None:
+            base %= mod
+        n >>= 1
+    return result
 
 
 # ---------------------------------------------------------------------------
