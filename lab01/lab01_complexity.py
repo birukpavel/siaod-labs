@@ -61,21 +61,34 @@ POW_CALLS = 20_000  # вызовов binary_pow на один замер: ина
 
 
 def array_sum(a: list[int]) -> int:
-    """Сумма элементов массива. Ожидаемая сложность: TODO (обосновать в отчёте)."""
-    # TODO: реализовать циклом
-    raise NotImplementedError
+    """Сумма элементов. Θ(n), память Θ(1)."""
+    total = 0
+    for value in a:
+        total += value
+    return total
 
 
 def array_max(a: list[int]) -> int:
-    """Максимум массива (массив непуст). Ожидаемая сложность: TODO."""
-    # TODO: реализовать циклом
-    raise NotImplementedError
+    """Максимум. Θ(n): каждый элемент нужно сравнить хотя бы раз."""
+    if not a:
+        raise ValueError("максимум не определён для пустого массива")
+    best = a[0]
+    for value in a:
+        if value > best:  # pylint: disable=consider-using-max-builtin
+            best = value
+    return best
 
 
 def count_equal_pairs(a: list[int]) -> int:
-    """Число пар (i, j), i < j, таких что a[i] == a[j]. Ожидаемая сложность: TODO."""
-    # TODO: реализовать двойным циклом
-    raise NotImplementedError
+    """Пары (i, j), i < j, с a[i] == a[j]. Двойной цикл: n(n-1)/2 сравнений, Θ(n²)."""
+    n = len(a)
+    pairs = 0
+    for i in range(n):
+        ai = a[i]  # вынесено из внутреннего цикла
+        for j in range(i + 1, n):
+            if ai == a[j]:
+                pairs += 1
+    return pairs
 
 
 def binary_pow(x: int, n: int, mod: int | None = None) -> int:
