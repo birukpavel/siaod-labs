@@ -371,7 +371,7 @@ def run_benchmarks(data_dir: Path) -> dict[str, list[tuple[int, float]]]:
         print(f"\n{name}:")
         for n in SIZES:
             a = random_arrays[n]
-            t = bench(lambda: fn(a))
+            t = bench(lambda fn=fn, a=a: fn(a))
             points.append((n, t))
             print(f"  n={n:>7}  t={t:.6f} c")
         results[name] = points
@@ -382,7 +382,7 @@ def run_benchmarks(data_dir: Path) -> dict[str, list[tuple[int, float]]]:
     for n in QUADRATIC_SIZES:
         file_n = n if n in SIZES else min(s for s in SIZES if s >= n)
         a = load_array(data_dir, "dups", file_n, limit=n)
-        t = bench(lambda: count_equal_pairs(a))
+        t = bench(lambda a=a: count_equal_pairs(a))
         points.append((n, t))
         print(f"  n={n:>7}  t={t:.6f} c")
     results["count_equal_pairs"] = points
@@ -412,6 +412,8 @@ def run_benchmarks(data_dir: Path) -> dict[str, list[tuple[int, float]]]:
 
 def plot_results(results: dict[str, list[tuple[int, float]]], out_dir: Path) -> None:
     """Два графика: log-log для степенных алгоритмов и t(log n) для бинарной степени."""
+    # matplotlib необязателен: без него работа выполняется, графики пропускаются
+    # pylint: disable=import-outside-toplevel
     try:
         import matplotlib
 
@@ -465,6 +467,7 @@ def plot_results(results: dict[str, list[tuple[int, float]]], out_dir: Path) -> 
 
 
 def main() -> None:
+    """Самопроверка, замеры, наклоны и графики."""
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
@@ -492,6 +495,7 @@ def main() -> None:
     print("\nНаклон в осях log-log (оценка показателя степени):")
     for name in ("array_sum", "array_max", "count_equal_pairs"):
         print(f"  {name:20s} {log_log_slope(results[name]):.3f}")
+
     # TODO: сопоставить наклоны с аналитическими оценками из отчёта
     # и объяснить расхождения (константы, кэш, накладные расходы интерпретатора).
 
