@@ -429,14 +429,17 @@ def expect_index_error(call, what: str) -> None:
 
 
 def stack_methods(st: Stack) -> dict:
+    """Операции своего стека."""
     return {"push": st.push, "pop": st.pop, "peek": st.peek, "len": st.__len__}
 
 
 def list_stack_methods(a: list) -> dict:
+    """Те же операции на list — эталон для стека."""
     return {"push": a.append, "pop": a.pop, "peek": lambda: a[-1], "len": a.__len__}
 
 
 def deque_methods(dq: Deque) -> dict:
+    """Операции своего дека."""
     return {
         "push_front": dq.push_front,
         "push_back": dq.push_back,
@@ -447,6 +450,7 @@ def deque_methods(dq: Deque) -> dict:
 
 
 def std_deque_methods(d: collections.deque) -> dict:
+    """Те же операции на collections.deque — эталон для дека."""
     return {
         "push_front": d.appendleft,
         "push_back": d.append,
@@ -520,7 +524,7 @@ def expected_copies(size: int) -> int:
 
 
 def check_recursion() -> None:
-    """Факториал, числа Фибоначчи со счётчиками вызовов, ходы Ханойских башен."""
+    """Факториал, числа Фибоначчи со счётчиками вызовов, Ханойские башни."""
     for n in range(21):
         got = factorial(n)
         expect(
@@ -550,6 +554,11 @@ def check_recursion() -> None:
             f"не больше 2n + 1 = {2 * n + 1} — memo не передаётся в рекурсию?",
         )
 
+    check_hanoi()
+
+
+def check_hanoi() -> None:
+    """Проиграть записанные ходы: допустимость каждого, итог на dst, число 2^n - 1."""
     for n, (src, dst, aux) in (
         (0, "ACB"),
         (1, "ACB"),
@@ -765,6 +774,149 @@ def check_variant_ops(stack_ops: list[Op], deque_ops: list[Op]) -> None:
     )
 
 
+# --- Собственные проверки: внутреннее состояние -------------------------------
+# Проверки заготовки смотрят на контракт (что структура возвращает).
+# Здесь — инварианты, которые контракт не ловит.
+
+
+def check_capacity_invariant() -> None:
+    """size <= capacity и ёмкость = 4 * 2^k — после каждой операции серии."""
+    rng = random.Random(32)  # seed варианта — серия воспроизводима
+    arr, ref = DynamicArray(), []
+    for step in range(1, 5_001):
+        if not ref or rng.random() < 0.6:
+            value = rng.randrange(1_000_000)
+            arr.append(value)
+            ref.append(value)
+            what = f"append({value})"
+        else:
+            got, expected = arr.pop(), ref.pop()
+            expect(got == expected, f"шаг {step}, pop(): {got!r}, эталон {expected!r}")
+            what = "pop()"
+        expect(
+            len(arr) == len(ref),
+            f"шаг {step}, {what}: len = {len(arr)}, эталон {len(ref)}",
+        )
+        expect(
+            len(arr) <= arr.capacity,
+            f"шаг {step}, {what}: size = {len(arr)} > capacity = {arr.capacity}",
+        )
+        factor, remainder = divmod(arr.capacity, DynamicArray.INITIAL_CAPACITY)
+        expect(
+            remainder == 0 and factor >= 1 and factor & (factor - 1) == 0,
+            f"шаг {step}, {what}: capacity = {arr.capacity} — не начальная "
+            f"ёмкость {DynamicArray.INITIAL_CAPACITY}, умноженная на степень двойки",
+        )
+    for i, value in enumerate(ref):
+        got = arr.get(i)
+        expect(got == value, f"после серии get({i}) = {got!r}, эталон {value!r}")
+
+
+def check_shrink_threshold() -> None:
+    """Порог 1/4 не даёт «раскачки»: при 1/2 каждая пара append/pop копировала бы массив."""
+    size = 64  # 4 * 2**4 — ёмкость заполнена ровно
+    arr = DynamicArray()
+    for i in range(size):
+        arr.append(i)
+    expect(
+        arr.capacity == size,
+        f"после {size} append: capacity = {arr.capacity}, ожидалось {size}",
+    )
+
+    pairs = 1_000
+    copies_before = arr.copies
+    for _ in range(pairs):
+        arr.append(0)  # буфер полон -> рост до 2 * size
+        arr.pop()  # size = capacity // 2 > capacity // 4 -> сжатия нет
+    copied = arr.copies - copies_before
+    expect(
+        copied <= size,
+        f"{pairs} пар append/pop на границе ёмкости скопировали {copied} "
+        f"элементов; при пороге 1/4 достаточно одного переноса ({size})",
+    )
+    expect(
+        len(arr) == size and arr.capacity == 2 * size,
+        f"после серии: size = {len(arr)}, capacity = {arr.capacity}",
+    )
+
+
+def check_deque_links() -> None:
+    """Обход от head и от tail даёт взаимно обратные последовательности (белый ящик)."""
+
+    def walk(dq: Deque, where: str) -> None:
+        # белый ящик: проверяются внутренние ссылки своей структуры
+        # pylint: disable=protected-access
+        forward, node, steps = [], dq._head, 0
+        while node is not None:
+            forward.append(node.value)
+            steps += 1
+            expect(
+                steps <= len(dq) + 1,
+                f"{where}: проход от head длиннее размера — цикл в списке",
+            )
+            node = node.next
+        backward, node = [], dq._tail
+        while node is not None:
+            backward.append(node.value)
+            node = node.prev
+        expect(
+            len(forward) == len(dq),
+            f"{where}: от head видно {len(forward)} узлов, len = {len(dq)}",
+        )
+        expect(
+            forward == backward[::-1],
+            f"{where}: вперёд {forward}, назад {backward} — ссылки рассогласованы",
+        )
+        if dq._head is not None:
+            expect(dq._head.prev is None, f"{where}: у головы есть предыдущий узел")
+            expect(dq._tail.next is None, f"{where}: у хвоста есть следующий узел")
+        else:
+            expect(dq._tail is None, f"{where}: дек пуст, но tail ссылается на узел")
+
+    rng = random.Random(32)
+    dq = Deque()
+    names = ("push_front", "push_back", "pop_front", "pop_back")
+    for step in range(1, 2_001):
+        name = rng.choice(names)
+        try:
+            if name.startswith("push"):
+                getattr(dq, name)(rng.randrange(1_000))
+            else:
+                getattr(dq, name)()
+        except IndexError:
+            pass  # операция над пустым деком — штатный случай
+        walk(dq, f"шаг {step}, {name}")
+
+
+def check_recursion_edges() -> None:
+    """Область определения факториала и независимость кэша между вызовами fib_memo.
+
+    Общий кэш контрактные проверки не видят: результат остаётся верным,
+    расходится только счётчик.
+    """
+    try:
+        factorial(-1)
+    except ValueError:
+        pass
+    except RecursionError as err:
+        raise SelfCheckError(
+            "factorial(-1): вместо проверки области определения — RecursionError"
+        ) from err
+    else:
+        raise SelfCheckError("factorial(-1): ожидался ValueError")
+
+    counts = []
+    for _ in range(2):
+        CALLS["fib_memo"] = 0
+        fib_memo(30)
+        counts.append(CALLS["fib_memo"])
+    expect(
+        counts[0] == counts[1] == 2 * 30 - 1,
+        f"fib_memo(30) дважды: входов {counts[0]} и {counts[1]}, ожидалось "
+        f"{2 * 30 - 1} в каждом вызове — кэш не должен переживать вызов",
+    )
+
+
 def self_check(stack_ops: list[Op], deque_ops: list[Op]) -> None:
     """Все проверки по разделам; при любой ошибке замеры не выполняются."""
     checks = (
@@ -773,6 +925,10 @@ def self_check(stack_ops: list[Op], deque_ops: list[Op]) -> None:
         ("Stack", check_stack),
         ("Deque", check_deque),
         ("операции варианта", lambda: check_variant_ops(stack_ops, deque_ops)),
+        ("инвариант ёмкости", check_capacity_invariant),
+        ("порог сжатия", check_shrink_threshold),
+        ("ссылки дека", check_deque_links),
+        ("границы рекурсии", check_recursion_edges),
     )
     failed = 0
     print("self_check:")
@@ -786,13 +942,13 @@ def self_check(stack_ops: list[Op], deque_ops: list[Op]) -> None:
         except SelfCheckError as err:
             print(f"  {name}: ОШИБКА — {err}")
             failed += 1
-        except Exception:  # noqa: BLE001 — падение реализации тоже результат проверки
+        # падение реализации — тоже результат проверки
+        except Exception:  # pylint: disable=broad-exception-caught
             print(f"  {name}: ИСКЛЮЧЕНИЕ")
             traceback.print_exc(file=sys.stdout)
             failed += 1
         else:
             print(f"  {name}: OK")
-    # TODO: добавить собственные проверки инвариантов и описать их в отчёте.
     if failed:
         raise SystemExit(
             f"self_check: не пройдено разделов — {failed}; "
