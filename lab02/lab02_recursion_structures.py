@@ -1044,12 +1044,8 @@ FRONT_CASES = {
 FRONT_TITLES = {"insert": "Вставка в начало", "remove": "Удаление из начала"}
 
 
-def run_benchmarks(
-    append_sizes: list[int], stack_ops: list[Op], deque_ops: list[Op]
-) -> dict:
-    """Замеры на данных варианта. Возвращает результаты для графиков."""
-    results: dict = {}
-
+def print_call_counts() -> None:
+    """Таблица числа вызовов наивной и мемоизированной рекурсии на FIB_NS."""
     print("\nЧисло вызовов: наивная рекурсия против мемоизации")
     for n in FIB_NS:
         CALLS["fib_naive"] = CALLS["fib_memo"] = 0
@@ -1061,37 +1057,48 @@ def run_benchmarks(
         )
     # TODO: вывести в отчёте формулы числа вызовов обеих функций и сверить с таблицей.
 
+
+def bench_append(append_sizes: list[int]) -> list[tuple[int, float, float, float]]:
+    """Серии append: (n, t/n своего массива, t/n list, действий на операцию)."""
     print("\nСерии append на размерах варианта:")
-    results["append"] = []
+    rows = []
     for n in append_sizes:
-        t_own = bench(lambda: appends(DynamicArray().append, n)) / n
-        t_list = bench(lambda: appends([].append, n)) / n
+        t_own = bench(lambda n=n: appends(DynamicArray().append, n)) / n
+        t_list = bench(lambda n=n: appends([].append, n)) / n
         arr = DynamicArray()
         appends(arr.append, n)
         cost = (n + arr.copies) / n  # записи и копирования на одну операцию
-        results["append"].append((n, t_own, t_list, cost))
+        rows.append((n, t_own, t_list, cost))
         print(
             f"  n={n:>7}  t/n: DynamicArray {t_own:.2e} c, list {t_list:.2e} c"
             f"  копирований {arr.copies:>7}  (n + копирования)/n = {cost:.3f}"
         )
     # TODO: объяснить методом учёта, почему (n + копирования)/n < 3 и почему
     # у соседних размеров 2**k и 2**k + 1 эта величина различается почти на 1.
+    return rows
 
-    for key, title in FRONT_TITLES.items():
-        print(
-            f"\n{title}: время одной операции при размере n = "
-            f"{', '.join(map(str, FRONT_SIZES))}"
-        )
-        results[key] = {}
-        for label, kind, methods in FRONT_CASES[key]:
-            points = []
-            for n in FRONT_SIZES:
-                add, remove = methods(filled_structure(kind, n))
-                points.append((n, bench(lambda: steady_ops(add, remove)) / FRONT_OPS))
-            results[key][label] = points
-            row = "  ".join(f"{t:.2e}" for _, t in points)
-            print(f"  {label:28s} {row}   наклон {log_log_slope(points):.2f}")
 
+def bench_front(key: str) -> dict[str, list[tuple[int, float]]]:
+    """Операции у начала (key — insert или remove): {подпись: [(n, t), ...]}."""
+    print(
+        f"\n{FRONT_TITLES[key]}: время одной операции при размере n = "
+        f"{', '.join(map(str, FRONT_SIZES))}"
+    )
+    curves = {}
+    for label, kind, methods in FRONT_CASES[key]:
+        points = []
+        for n in FRONT_SIZES:
+            add, remove = methods(filled_structure(kind, n))
+            t = bench(lambda add=add, remove=remove: steady_ops(add, remove))
+            points.append((n, t / FRONT_OPS))
+        curves[label] = points
+        row = "  ".join(f"{t:.2e}" for _, t in points)
+        print(f"  {label:28s} {row}   наклон {log_log_slope(points):.2f}")
+    return curves
+
+
+def bench_variant_ops(stack_ops: list[Op], deque_ops: list[Op]) -> None:
+    """Операции варианта целиком: своя структура против стандартной."""
     print("\nОперации варианта целиком: время на операцию")
     cases = (
         (
@@ -1112,14 +1119,25 @@ def run_benchmarks(
         ),
     )
     for name, ops, own_label, make_own, ref_label, make_ref in cases:
-        t_own = bench(lambda: replay(ops, make_own())) / len(ops)
-        t_ref = bench(lambda: replay(ops, make_ref())) / len(ops)
+        t_own = bench(lambda ops=ops, make=make_own: replay(ops, make())) / len(ops)
+        t_ref = bench(lambda ops=ops, make=make_ref: replay(ops, make())) / len(ops)
         print(
             f"  {name}: {own_label} {t_own:.2e} c, {ref_label} {t_ref:.2e} c"
             f" — в {t_own / t_ref:.1f} раза медленнее"
         )
     # TODO: объяснить, откуда постоянный множитель между своими и стандартными
     # структурами, если асимптотика операций одинакова.
+
+
+def run_benchmarks(
+    append_sizes: list[int], stack_ops: list[Op], deque_ops: list[Op]
+) -> dict:
+    """Замеры на данных варианта. Возвращает результаты для графиков."""
+    print_call_counts()
+    results: dict = {"append": bench_append(append_sizes)}
+    for key in FRONT_TITLES:
+        results[key] = bench_front(key)
+    bench_variant_ops(stack_ops, deque_ops)
     return results
 
 
@@ -1128,21 +1146,8 @@ def run_benchmarks(
 # ---------------------------------------------------------------------------
 
 
-def plot_results(results: dict, out_dir: Path) -> None:
-    """Два графика: серии append варианта и операции у начала (log-log)."""
-    try:
-        import matplotlib
-
-        matplotlib.use("Agg")  # сохранение в файл без графической оболочки
-        import matplotlib.pyplot as plt
-    except ImportError:
-        print(
-            "\nmatplotlib не установлен — графики пропущены "
-            "(pip install -r requirements.txt)"
-        )
-        return
-
-    rows = results["append"]
+def plot_append(plt, rows: list, out_dir: Path) -> Path:
+    """Стоимость append: время на операцию и число элементарных действий."""
     ns = [row[0] for row in rows]
     fig, (ax_t, ax_c) = plt.subplots(1, 2, figsize=(12, 4.5))
     ax_t.plot(ns, [row[1] for row in rows], marker="o", label="DynamicArray.append")
@@ -1163,10 +1168,14 @@ def plot_results(results: dict, out_dir: Path) -> None:
     ax_c.grid(True, which="both", linewidth=0.3)
     ax_c.legend(loc="lower right")
     fig.tight_layout()
-    append_path = out_dir / "lab02_append.png"
-    fig.savefig(append_path, dpi=150)
+    path = out_dir / "lab02_append.png"
+    fig.savefig(path, dpi=150)
+    return path
 
-    fig2, axes = plt.subplots(1, 2, figsize=(12, 4.5), sharey=True)
+
+def plot_front(plt, results: dict, out_dir: Path) -> Path:
+    """Операции у начала структуры в осях log-log."""
+    fig, axes = plt.subplots(1, 2, figsize=(12, 4.5), sharey=True)
     for ax, (key, title) in zip(axes, FRONT_TITLES.items()):
         for label, points in results[key].items():
             ax.plot(
@@ -1182,10 +1191,30 @@ def plot_results(results: dict, out_dir: Path) -> None:
         ax.grid(True, which="both", linewidth=0.3)
         ax.legend(fontsize=8)
     axes[0].set_ylabel("время одной операции, с")
-    fig2.tight_layout()
-    front_path = out_dir / "lab02_front.png"
-    fig2.savefig(front_path, dpi=150)
+    fig.tight_layout()
+    path = out_dir / "lab02_front.png"
+    fig.savefig(path, dpi=150)
+    return path
 
+
+def plot_results(results: dict, out_dir: Path) -> None:
+    """Два графика: серии append варианта и операции у начала (log-log)."""
+    # matplotlib необязателен: без него работа выполняется, графики пропускаются
+    # pylint: disable=import-outside-toplevel
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")  # сохранение в файл без графической оболочки
+        import matplotlib.pyplot as plt
+    except ImportError:
+        print(
+            "\nmatplotlib не установлен — графики пропущены "
+            "(pip install -r requirements.txt)"
+        )
+        return
+
+    append_path = plot_append(plt, results["append"], out_dir)
+    front_path = plot_front(plt, results, out_dir)
     print(f"\nГрафики сохранены:\n  {append_path}\n  {front_path}")
     # TODO: в отчёте объяснить, почему у list.insert(0, x) и list.pop(0) наклон
     # около 1, а у операций на концах deque и своего Deque — около 0.
@@ -1195,6 +1224,7 @@ def plot_results(results: dict, out_dir: Path) -> None:
 
 
 def main() -> None:
+    """Самопроверка, замеры и графики."""
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
