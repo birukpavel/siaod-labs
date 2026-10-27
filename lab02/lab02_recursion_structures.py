@@ -151,44 +151,68 @@ class DynamicArray:
 
     @property
     def capacity(self) -> int:
+        """Текущая ёмкость буфера."""
         return self._capacity
+
+    def _reallocate(self, new_capacity: int) -> None:
+        """Перенос в буфер новой ёмкости, Θ(size). Общий шаг для роста и сжатия."""
+        new_buffer: list = [None] * new_capacity
+        for i in range(self._size):
+            new_buffer[i] = self._buffer[i]
+        self.copies += self._size
+        self._buffer = new_buffer
+        self._capacity = new_capacity
 
     def _grow(self) -> None:
         """Увеличить ёмкость в 2 раза и скопировать элементы в новый буфер."""
-        # TODO: выделить новый буфер размера 2 * capacity, перенести _size элементов,
-        # увеличить self.copies на число перенесённых элементов
-        raise NotImplementedError
+        self._reallocate(self._capacity * 2)
+
+    def _shrink(self) -> None:
+        """Уменьшить ёмкость вдвое, но не ниже начальной."""
+        self._reallocate(max(self.INITIAL_CAPACITY, self._capacity // 2))
 
     def append(self, value) -> None:
         """Добавить элемент в конец; при size == capacity сначала вызвать _grow.
 
-        Амортизированная сложность: TODO (обосновать методом учёта в отчёте).
+        O(1) амортизированно: после расширения до 2m следующее — через m
+        добавлений. Оценка методом учёта — в отчёте.
         """
-        # TODO: рост при необходимости, запись в ячейку _buffer[_size], инкремент _size
-        raise NotImplementedError
+        if self._size == self._capacity:
+            self._grow()
+        self._buffer[self._size] = value
+        self._size += 1
 
     def pop(self):
         """Удалить и вернуть последний элемент; для пустого массива — IndexError.
 
-        Сжатие буфера необязательно. Если реализуете его, уменьшайте ёмкость
-        вдвое, когда size опускается до capacity // 4, и не ниже
-        INITIAL_CAPACITY (перенесённые элементы тоже учитываются в copies):
-        сжатие уже при заполнении на ½ даёт Θ(n) на операцию, если чередовать
-        append и pop на границе ёмкости.
+        Сжатие с порогом 1/4. При пороге 1/2 чередование append/pop на границе
+        ёмкости копировало бы массив каждый раз — Θ(n) на операцию.
         """
-        # TODO: проверка на пустоту, чтение _buffer[_size - 1], очистка ячейки
-        # (None — чтобы буфер не удерживал объект), декремент _size
-        raise NotImplementedError
+        if self._size == 0:
+            raise IndexError("pop из пустого DynamicArray")
+        value = self._buffer[self._size - 1]
+        self._buffer[self._size - 1] = None  # не удерживать ссылку
+        self._size -= 1
+        if self._capacity > self.INITIAL_CAPACITY and self._size <= self._capacity // 4:
+            self._shrink()
+        return value
+
+    def _check_index(self, index: int) -> None:
+        if not 0 <= index < self._size:
+            raise IndexError(
+                f"индекс {index} вне диапазона [0, {self._size}); "
+                f"отрицательная индексация не поддерживается"
+            )
 
     def get(self, index: int):
         """Вернуть элемент по индексу 0 <= index < size; иначе IndexError."""
-        # TODO: проверка границ (включая отрицательные индексы) + чтение из буфера
-        raise NotImplementedError
+        self._check_index(index)
+        return self._buffer[index]
 
     def set(self, index: int, value) -> None:
         """Записать элемент по индексу 0 <= index < size; иначе IndexError."""
-        # TODO: проверка границ + запись в буфер
-        raise NotImplementedError
+        self._check_index(index)
+        self._buffer[index] = value
 
 
 # ---------------------------------------------------------------------------
