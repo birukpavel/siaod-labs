@@ -230,31 +230,31 @@ class Stack:
         return len(self._data)
 
     def push(self, value) -> None:
-        """Положить элемент на вершину. Амортизированная сложность: TODO."""
-        # TODO: делегировать DynamicArray.append
-        raise NotImplementedError
+        """Положить на вершину. O(1)* — стоимость наследуется от DynamicArray."""
+        self._data.append(value)
 
     def pop(self):
-        """Снять элемент с вершины; для пустого стека — IndexError."""
-        # TODO: делегировать DynamicArray.pop
-        raise NotImplementedError
+        """Снять элемент с вершины; для пустого стека — IndexError. Сложность: O(1)*."""
+        if len(self._data) == 0:
+            raise IndexError("pop из пустого Stack")
+        return self._data.pop()
 
     def peek(self):
-        """Вернуть вершину без удаления; для пустого стека — IndexError."""
-        # TODO: для пустого стека — IndexError с понятным сообщением,
-        # иначе DynamicArray.get(len - 1)
-        raise NotImplementedError
+        """Вернуть вершину без удаления; для пустого стека — IndexError. Сложность: Θ(1)."""
+        if len(self._data) == 0:
+            raise IndexError("peek из пустого Stack")
+        return self._data.get(len(self._data) - 1)
 
 
-class _Node:
+class _Node:  # pylint: disable=too-few-public-methods
     """Узел двусвязного списка для Deque."""
 
     __slots__ = ("value", "prev", "next")
 
-    def __init__(self, value, prev=None, next=None) -> None:  # noqa: A002
+    def __init__(self, value, prev=None, nxt=None) -> None:
         self.value = value
         self.prev = prev
-        self.next = next
+        self.next = nxt
 
 
 class Deque:
@@ -273,24 +273,56 @@ class Deque:
         return self._size
 
     def push_front(self, value) -> None:
-        """Добавить элемент в начало. Сложность: TODO."""
-        # TODO: создать узел, перевязать ссылки head (учесть пустой дек)
-        raise NotImplementedError
+        """Добавить в начало. Θ(1) в худшем случае — перевязка ссылок."""
+        node = _Node(value, None, self._head)
+        if self._head is None:  # дек был пуст
+            self._tail = node
+        else:
+            self._head.prev = node
+        self._head = node
+        self._size += 1
 
     def push_back(self, value) -> None:
-        """Добавить элемент в конец. Сложность: TODO."""
-        # TODO: симметрично push_front для tail
-        raise NotImplementedError
+        """Добавить в конец. Θ(1)."""
+        node = _Node(value, self._tail, None)
+        if self._tail is None:  # дек был пуст
+            self._head = node
+        else:
+            self._tail.next = node
+        self._tail = node
+        self._size += 1
 
     def pop_front(self):
-        """Извлечь элемент из начала; для пустого дека — IndexError."""
-        # TODO: учесть переход к пустому деку (tail тоже обнуляется)
-        raise NotImplementedError
+        """Извлечь из начала; пустой дек — IndexError. Θ(1).
+
+        При опустошении обнуляем и _tail, иначе он остался бы ссылкой
+        на удалённый узел.
+        """
+        if self._head is None:
+            raise IndexError("pop_front из пустого Deque")
+        node = self._head
+        self._head = node.next
+        if self._head is None:  # дек опустел
+            self._tail = None
+        else:
+            self._head.prev = None
+        node.prev = node.next = None  # повторное удаление тогда упадёт сразу
+        self._size -= 1
+        return node.value
 
     def pop_back(self):
-        """Извлечь элемент из конца; для пустого дека — IndexError."""
-        # TODO: симметрично pop_front (при опустошении обнуляется и head)
-        raise NotImplementedError
+        """Извлечь из конца; пустой дек — IndexError. Θ(1)."""
+        if self._tail is None:
+            raise IndexError("pop_back из пустого Deque")
+        node = self._tail
+        self._tail = node.prev
+        if self._tail is None:  # дек опустел
+            self._head = None
+        else:
+            self._tail.next = None
+        node.prev = node.next = None
+        self._size -= 1
+        return node.value
 
 
 # ---------------------------------------------------------------------------
