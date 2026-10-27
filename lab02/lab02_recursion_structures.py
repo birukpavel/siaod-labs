@@ -1,27 +1,23 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""ЛР 2. Рекурсивные функции; динамический массив, стек и дек — стартовая заготовка.
+"""ЛР 2. Рекурсивные функции; динамический массив, стек и дек.
 
-Заготовка — это каркас, а не решение: заполните все TODO самостоятельно
-в соответствии с КИМ-02 и правилами использования генеративного ИИ
-(docs/ai-verification.md). Каркас загрузки данных, самопроверки, замеров
-и построения графиков уже готов — учебная задача в реализации структур
-и в объяснении результатов.
+Бирук Павел, вариант 2 (seed 32). Каркас загрузки данных, самопроверки,
+замеров и графиков — из заготовки курса.
 
-Работа выполняется на данных СВОЕГО варианта. Перед первым запуском их нужно
-сгенерировать (из корня репозитория курса):
+Данные варианта: make data FOS=<путь к репозиторию курса> SET=ops
 
-    python scripts/generate_data.py --variant N --only ops
+Запуск:
 
-Запуск (N — ваш номер варианта):
+    python lab02/lab02_recursion_structures.py --variant 2 --out lab02/figures
 
-    python lab02-recursion-structures-starter.py --variant N
-
-Если заготовка скопирована в личный репозиторий и каталог с данными не находится
-автоматически, укажите его явно:
-
-    python lab02-recursion-structures-starter.py --variant N --data ~/data-structures-and-algorithms/data/generated
+Если data/generated не находится автоматически — --data <путь>.
 """
+
+# Реализация, самопроверка и замеры — в одном модуле, как в заготовке курса;
+# каркас заготовки (поиск данных, сверка варианта, замер, разбор аргументов)
+# общий с ЛР 1.
+# pylint: disable=too-many-lines,duplicate-code
 
 from __future__ import annotations
 
@@ -1055,7 +1051,6 @@ def print_call_counts() -> None:
             f"  n={n:>2}  F(n)={value:>6}  fib_naive: {CALLS['fib_naive']:>7} вызовов"
             f"  fib_memo: {CALLS['fib_memo']:>2} вызовов"
         )
-    # TODO: вывести в отчёте формулы числа вызовов обеих функций и сверить с таблицей.
 
 
 def bench_append(append_sizes: list[int]) -> list[tuple[int, float, float, float]]:
@@ -1073,8 +1068,6 @@ def bench_append(append_sizes: list[int]) -> list[tuple[int, float, float, float
             f"  n={n:>7}  t/n: DynamicArray {t_own:.2e} c, list {t_list:.2e} c"
             f"  копирований {arr.copies:>7}  (n + копирования)/n = {cost:.3f}"
         )
-    # TODO: объяснить методом учёта, почему (n + копирования)/n < 3 и почему
-    # у соседних размеров 2**k и 2**k + 1 эта величина различается почти на 1.
     return rows
 
 
@@ -1125,8 +1118,6 @@ def bench_variant_ops(stack_ops: list[Op], deque_ops: list[Op]) -> None:
             f"  {name}: {own_label} {t_own:.2e} c, {ref_label} {t_ref:.2e} c"
             f" — в {t_own / t_ref:.1f} раза медленнее"
         )
-    # TODO: объяснить, откуда постоянный множитель между своими и стандартными
-    # структурами, если асимптотика операций одинакова.
 
 
 def run_benchmarks(
@@ -1216,8 +1207,6 @@ def plot_results(results: dict, out_dir: Path) -> None:
     append_path = plot_append(plt, results["append"], out_dir)
     front_path = plot_front(plt, results, out_dir)
     print(f"\nГрафики сохранены:\n  {append_path}\n  {front_path}")
-    # TODO: в отчёте объяснить, почему у list.insert(0, x) и list.pop(0) наклон
-    # около 1, а у операций на концах deque и своего Deque — около 0.
 
 
 # ---------------------------------------------------------------------------
